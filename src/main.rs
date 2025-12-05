@@ -14,14 +14,11 @@ const MAX_SAFE_RUPIAH_I64: i64 = 1_000_000_000_000_000; // 1e15
 
 /// Read a single line of user input from stdin and return it as an owned `String`.
 ///
-/// This function is extracted from our previous `main` function to avoid repeating
-/// the same boilerplate code each time we want to ask the user for input.
-///
 /// How it works:
-/// 1. Create an empty `String` buffer.
-/// 2. Call `read_line` to fill that buffer with user input.
-/// 3. `trim()` removes whitespace and the trailing newline.
-/// 4. `to_string()` creates a new owned String so it can be returned safely.
+/// 1. Create an empty String.
+/// 2. Fill it using `read_line`.
+/// 3. Trim whitespace and newline.
+/// 4. Convert slice → owned String (so we can safely return it).
 fn read_line() -> String {
     let mut input = String::new();
 
@@ -34,14 +31,16 @@ fn read_line() -> String {
 
 /// Read a whole-number rupiah amount as i64.
 ///
-/// Accepts only clean digits: "10000", "2500000"
+/// Accepts:
+/// - "10000"
+/// - "2500000"
 ///
 /// Rejects:
-/// - thousand separators ".", ","
+/// - ".", ","
 /// - decimals
-/// - negatives
+/// - letters
 /// - empty input
-/// - values > MAX_SAFE_RUPIAH_I64
+/// - numbers > MAX_SAFE_RUPIAH_I64
 fn read_number(prompt: &str) -> i64 {
     loop {
         print!("{}", prompt);
@@ -50,8 +49,8 @@ fn read_number(prompt: &str) -> i64 {
         let raw = read_line();
 
         if raw.contains('.') || raw.contains(',') {
-            println!("❌ Tidak menerima tanda pemisah atau desimal. Hanya boleh angka tanpa format.");
-            println!("   Contoh benar: 10000 (bukan 10.000 atau 10,000)\n");
+            println!("❌ Tidak menerima tanda pemisah atau desimal.");
+            println!("   Contoh benar: 10000\n");
             continue;
         }
 
@@ -100,7 +99,7 @@ enum TerCategory {
 }
 
 impl PtkpStatus {
-    /// Returns a human-readable label for this PTKP status.
+    /// Return a human-readable label for this PTKP status.
     fn display_name(&self) -> &'static str {
         match self {
             PtkpStatus::TK0 => "TK/0 - Tidak Kawin, Tanpa Tanggungan",
@@ -114,12 +113,7 @@ impl PtkpStatus {
         }
     }
 
-    // Map PTKP → TER Category
-    ///
-    /// Rule:
-    /// A → TK0, TK1, K0
-    /// B → TK2, TK3, K1, K2
-    /// C → K3
+    /// Map PTKP → TER Category (Rule: A for TK0/TK1/K0, etc.)
     fn get_ter_category(&self) -> TerCategory {
         match self {
             PtkpStatus::TK0 | PtkpStatus::TK1 | PtkpStatus::K0 => TerCategory::A,
@@ -169,6 +163,26 @@ fn format_rupiah(amount: i64) -> String {
 }
 
 // ===============================================================
+// SIMPLE TER RATE + SIMPLE TAX
+// ===============================================================
+
+/// Temporary simplified TER rates.
+/// Real government tables will be added later.
+fn get_simple_ter_rate(category: TerCategory) -> f64 {
+    match category {
+        TerCategory::A => 5.0,
+        TerCategory::B => 10.0,
+        TerCategory::C => 15.0,
+    }
+}
+
+/// Simple Gross-method PPh21:
+///       bruto × (ter_rate / 100)
+fn calculate_pph21_gross(bruto: i64, ter_rate_percent: f64) -> f64 {
+    bruto as f64 * (ter_rate_percent / 100.0)
+}
+
+// ===============================================================
 // MAIN
 // ===============================================================
 
@@ -176,20 +190,24 @@ fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                 KALKULATOR PPh 21 BULANAN                    ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
-    println!("\n📌 Step 4: input penghasilan brute + PTKP + kategori TER.\n");
+    println!("\n📌 Step 5: Hitung PPh21 sederhana (Gross Method).\n");
 
     let penghasilan_bruto = read_number("💵 Masukkan Penghasilan Bruto Bulanan: ");
     let ptkp_status = select_ptkp();
 
-    // Determine TER category
+    // Determine special category (A/B/C)
     let ter_category = ptkp_status.get_ter_category();
+
+    // Get simple TER rate
+    let ter_rate = get_simple_ter_rate(ter_category);
+
+    // Calculate simple PPh21
+    let pph21 = calculate_pph21_gross(penghasilan_bruto, ter_rate);
 
     println!("\n===== RINGKASAN INPUT =====");
     println!("Penghasilan Bruto : {}", format_rupiah(penghasilan_bruto));
     println!("Status PTKP       : {}", ptkp_status.display_name());
-    // We use `{:?}` because `TerCategory` derives the `Debug` trait,
-    // which allows quick developer-friendly printing of enum variants (A, B, C).
-    // In the future, we can implement the `Display` trait to allow using `{}`
-    // for prettier, user-facing output instead of debug formatting.
     println!("Kategori TER      : {:?}", ter_category);
+    println!("Tarif TER         : {}%", ter_rate);
+    println!("PPh21 (Sederhana) : Rp {:.0}", pph21);
 }
