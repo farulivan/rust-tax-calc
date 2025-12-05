@@ -110,8 +110,99 @@ fn read_number(prompt: &str) -> i64 {
     }
 }
 
-/// Format an i64 rupiah amount into a display string,
-/// e.g. 10000 -> "Rp 10000".
+// ===============================================================
+// PTKP STATUS ENUM
+// ===============================================================
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PtkpStatus {
+    TK0,
+    TK1,
+    TK2,
+    TK3,
+    K0,
+    K1,
+    K2,
+    K3,
+}
+
+impl PtkpStatus {
+    /// Returns a human-readable label for this PTKP status.
+    ///
+    /// Why `&self`?
+    /// - This is an *instance method*, meaning it is called on a value such as:
+    ///     `ptkp.display_name()`
+    /// - We borrow `self` instead of taking ownership because:
+    ///     - We don’t need to modify it.
+    ///     - We don’t want to move it (enums are cheap to pass, but borrowing is idiomatic).
+    ///
+    /// Why return `&'static str`?
+    /// - All returned values are **string literals**, e.g. `"TK/0 - ..."`.
+    /// - String literals live for the *entire lifetime of the program*, so they naturally have
+    ///   a `'static` lifetime.
+    /// - Returning `&'static str` is correct, efficient, and avoids unnecessary allocations.
+    ///
+    /// Why `match self`?
+    /// - We pattern-match the enum variant to select the correct label.
+    /// - `self` is borrowed, so we match the reference directly
+    ///   because Rust automatically dereferences in match patterns when possible.
+    fn display_name(&self) -> &'static str {
+        match self {
+            PtkpStatus::TK0 => "TK/0 - Tidak Kawin, Tanpa Tanggungan",
+            PtkpStatus::TK1 => "TK/1 - Tidak Kawin, 1 Tanggungan",
+            PtkpStatus::TK2 => "TK/2 - Tidak Kawin, 2 Tanggungan",
+            PtkpStatus::TK3 => "TK/3 - Tidak Kawin, 3 Tanggungan",
+            PtkpStatus::K0  => "K/0  - Kawin, Tanpa Tanggungan",
+            PtkpStatus::K1  => "K/1  - Kawin, 1 Tanggungan",
+            PtkpStatus::K2  => "K/2  - Kawin, 2 Tanggungan",
+            PtkpStatus::K3  => "K/3  - Kawin, 3 Tanggungan",
+        }
+    }
+}
+
+/// Show PTKP menu and keep asking until the user selects 1–8.
+/// Returns the chosen `PtkpStatus`.
+fn select_ptkp() -> PtkpStatus {
+    println!("\n📋 Pilih Status PTKP:");
+    println!("   1. TK/0 - Tidak Kawin, Tanpa Tanggungan");
+    println!("   2. TK/1 - Tidak Kawin, 1 Tanggungan");
+    println!("   3. TK/2 - Tidak Kawin, 2 Tanggungan");
+    println!("   4. TK/3 - Tidak Kawin, 3 Tanggungan");
+    println!("   5. K/0  - Kawin, Tanpa Tanggungan");
+    println!("   6. K/1  - Kawin, 1 Tanggungan");
+    println!("   7. K/2  - Kawin, 2 Tanggungan");
+    println!("   8. K/3  - Kawin, 3 Tanggungan");
+
+    loop {
+        print!("\nPilihan Anda (1-8): ");
+        io::stdout().flush().unwrap();
+
+        let input = read_line();
+
+        match input.as_str() {
+            "1" => return PtkpStatus::TK0,
+            "2" => return PtkpStatus::TK1,
+            "3" => return PtkpStatus::TK2,
+            "4" => return PtkpStatus::TK3,
+            "5" => return PtkpStatus::K0,
+            "6" => return PtkpStatus::K1,
+            "7" => return PtkpStatus::K2,
+            "8" => return PtkpStatus::K3,
+            _ => {
+                println!("❌ Pilihan tidak valid. Silakan pilih 1-8.");
+            }
+        }
+    }
+}
+
+// ===============================================================
+// RUPIAH FORMATTER
+// ===============================================================
+
+/// Format an `i64` amount into a simple Rupiah string, e.g. 10000 → "Rp 10000".
+///
+/// At this step, we keep it simple (no thousand separators),
+/// just to focus on the flow and types.
 fn format_rupiah(amount: i64) -> String {
     // In debug builds, sanity-check we didn’t accidentally pass negative.
     // This is just a sanity check, not a runtime validation.
@@ -121,14 +212,24 @@ fn format_rupiah(amount: i64) -> String {
     format!("Rp {}", amount)
 }
 
+// =======================================================
+// MAIN
+// =======================================================
+
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                 KALKULATOR PPh 21 BULANAN                    ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
-    println!("\nSekarang kita akan mengubah input ke angka dan format Rupiah.\n");
+    println!("\n📌 Untuk sekarang: input penghasilan bruto + pilih status PTKP.\n");
 
+    // 1. Ask user for gross monthly income (whole rupiah, as i64).
     let penghasilan_bruto = read_number("💵 Masukkan Penghasilan Bruto Bulanan (contoh: 10000000): ");
 
-    println!("\nAnda memasukkan: {}", penghasilan_bruto);
-    println!("Dalam format Rupiah sederhana: {}", format_rupiah(penghasilan_bruto));
+    // 2. Ask user to choose PTKP status from the menu.
+    let ptkp_status = select_ptkp();
+
+    // 3. Show a simple summary of what the user entered.
+    println!("\n===== RINGKASAN INPUT =====");
+    println!("Penghasilan Bruto : {}", format_rupiah(penghasilan_bruto));
+    println!("Status PTKP       : {}", ptkp_status.display_name());
 }
