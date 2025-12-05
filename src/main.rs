@@ -4,21 +4,12 @@ use std::io::{self, Write};
 // CONSTANTS
 // ===============================================================
 
-// Upper limit for any rupiah amount we accept.
-// This avoids unrealistic values and keeps us safely within i64 range.
 const MAX_SAFE_RUPIAH_I64: i64 = 1_000_000_000_000_000; // 1e15
 
 // ===============================================================
-// FUNCTIONS
+// INPUT FUNCTIONS
 // ===============================================================
 
-/// Read a single line of user input from stdin and return it as an owned `String`.
-///
-/// How it works:
-/// 1. Create an empty String.
-/// 2. Fill it using `read_line`.
-/// 3. Trim whitespace and newline.
-/// 4. Convert slice → owned String (so we can safely return it).
 fn read_line() -> String {
     let mut input = String::new();
 
@@ -29,18 +20,6 @@ fn read_line() -> String {
     input.trim().to_string()
 }
 
-/// Read a whole-number rupiah amount as i64.
-///
-/// Accepts:
-/// - "10000"
-/// - "2500000"
-///
-/// Rejects:
-/// - ".", ","
-/// - decimals
-/// - letters
-/// - empty input
-/// - numbers > MAX_SAFE_RUPIAH_I64
 fn read_number(prompt: &str) -> i64 {
     loop {
         print!("{}", prompt);
@@ -49,8 +28,8 @@ fn read_number(prompt: &str) -> i64 {
         let raw = read_line();
 
         if raw.contains('.') || raw.contains(',') {
-            println!("❌ Tidak menerima tanda pemisah atau desimal.");
-            println!("   Contoh benar: 10000\n");
+            println!("❌ Tidak menerima tanda pemisah atau desimal. Hanya boleh angka tanpa format.");
+            println!("   Contoh benar: 10000 (bukan 10.000 atau 10,000)\n");
             continue;
         }
 
@@ -99,7 +78,6 @@ enum TerCategory {
 }
 
 impl PtkpStatus {
-    /// Return a human-readable label for this PTKP status.
     fn display_name(&self) -> &'static str {
         match self {
             PtkpStatus::TK0 => "TK/0 - Tidak Kawin, Tanpa Tanggungan",
@@ -113,7 +91,6 @@ impl PtkpStatus {
         }
     }
 
-    /// Map PTKP → TER Category (Rule: A for TK0/TK1/K0, etc.)
     fn get_ter_category(&self) -> TerCategory {
         match self {
             PtkpStatus::TK0 | PtkpStatus::TK1 | PtkpStatus::K0 => TerCategory::A,
@@ -123,7 +100,6 @@ impl PtkpStatus {
     }
 }
 
-/// Show PTKP menu and return a PtkpStatus.
 fn select_ptkp() -> PtkpStatus {
     println!("\n📋 Pilih Status PTKP:");
     println!("   1. TK/0 - Tidak Kawin, Tanpa Tanggungan");
@@ -163,11 +139,36 @@ fn format_rupiah(amount: i64) -> String {
 }
 
 // ===============================================================
-// SIMPLE TER RATE + SIMPLE TAX
+// Calculation Method ENUM
 // ===============================================================
 
-/// Temporary simplified TER rates.
-/// Real government tables will be added later.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CalculationMethod {
+    Gross,
+    GrossUp,
+}
+
+fn select_calculation_method() -> CalculationMethod {
+    println!("\n📋 Pilih Metode Perhitungan:");
+    println!("   1. Gross    - Pajak ditanggung karyawan (dipotong dari gaji)");
+    println!("   2. Gross Up - Pajak ditunjang perusahaan (dapat tunjangan pajak)");
+
+    loop {
+        print!("\nPilihan Anda (1-2): ");
+        io::stdout().flush().unwrap();
+
+        match read_line().as_str() {
+            "1" => return CalculationMethod::Gross,
+            "2" => return CalculationMethod::GrossUp,
+            _ => println!("❌ Pilihan tidak valid."),
+        }
+    }
+}
+
+// ===============================================================
+// SIMPLE TER + TAX FORMULAS
+// ===============================================================
+
 fn get_simple_ter_rate(category: TerCategory) -> f64 {
     match category {
         TerCategory::A => 5.0,
@@ -176,10 +177,16 @@ fn get_simple_ter_rate(category: TerCategory) -> f64 {
     }
 }
 
-/// Simple Gross-method PPh21:
-///       bruto × (ter_rate / 100)
-fn calculate_pph21_gross(bruto: i64, ter_rate_percent: f64) -> f64 {
-    bruto as f64 * (ter_rate_percent / 100.0)
+fn calculate_pph21_gross(bruto: i64, rate: f64) -> f64 {
+    bruto as f64 * (rate / 100.0)
+}
+
+// Gross Up Formula
+fn calculate_pph21_gross_up(bruto: i64, rate: f64) -> (f64, f64) {
+    let tunjangan = bruto as f64 * (rate / (100.0 - rate));
+    let total = bruto as f64 + tunjangan;
+    let pph21 = total * (rate / 100.0);
+    (tunjangan, pph21)
 }
 
 // ===============================================================
@@ -190,24 +197,38 @@ fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║                 KALKULATOR PPh 21 BULANAN                    ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
-    println!("\n📌 Step 5: Hitung PPh21 sederhana (Gross Method).\n");
+    println!("\n📌 Untuk sekarang: input penghasilan bruto + pilih status PTKP.\n");
 
-    let penghasilan_bruto = read_number("💵 Masukkan Penghasilan Bruto Bulanan: ");
+    let penghasilan_bruto = read_number("💵 Masukkan Penghasilan Bruto Bulanan (contoh: 10000000): ");
     let ptkp_status = select_ptkp();
 
-    // Determine special category (A/B/C)
+    // Ask calculation method
+    let method = select_calculation_method();
+
     let ter_category = ptkp_status.get_ter_category();
-
-    // Get simple TER rate
     let ter_rate = get_simple_ter_rate(ter_category);
-
-    // Calculate simple PPh21
-    let pph21 = calculate_pph21_gross(penghasilan_bruto, ter_rate);
 
     println!("\n===== RINGKASAN INPUT =====");
     println!("Penghasilan Bruto : {}", format_rupiah(penghasilan_bruto));
     println!("Status PTKP       : {}", ptkp_status.display_name());
     println!("Kategori TER      : {:?}", ter_category);
     println!("Tarif TER         : {}%", ter_rate);
-    println!("PPh21 (Sederhana) : Rp {:.0}", pph21);
+    println!("Metode            : {:?}\n", method);
+
+    // Branching based on method
+    match method {
+        CalculationMethod::Gross => {
+            let pph21 = calculate_pph21_gross(penghasilan_bruto, ter_rate);
+            println!("PPh21 (Sederhana / Gross) : Rp {:.0}", pph21);
+            println!("Penghasilan Bersih        : Rp {:.0}", (penghasilan_bruto as f64) - pph21);
+        }
+
+        CalculationMethod::GrossUp => {
+            let (tunjangan, pph21) = calculate_pph21_gross_up(penghasilan_bruto, ter_rate);
+            println!("Tunjangan PPh21           : Rp {:.0}", tunjangan);
+            println!("Total Penghasilan         : Rp {:.0}", tunjangan + penghasilan_bruto as f64);
+            println!("PPh21 (Sederhana / GrossUp): Rp {:.0}", pph21);
+            println!("Penghasilan Bersih        : Rp {:.0}", penghasilan_bruto);
+        }
+    }
 }
