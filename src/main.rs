@@ -139,7 +139,22 @@ fn select_ptkp() -> PtkpStatus {
 
 fn format_rupiah(amount: i64) -> String {
     debug_assert!(amount >= 0, "amount should never be negative here");
-    format!("Rp {}", amount)
+    
+    if amount == 0 {
+        return "Rp 0".to_string();
+    }
+
+    let s = amount.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.push('.');
+        }
+        result.push(c);
+    }
+
+    format!("Rp {}", result.chars().rev().collect::<String>())
 }
 
 // ===============================================================
@@ -205,7 +220,9 @@ fn get_ter_rate(category: TerCategory, bruto: f64) -> f64 {
         }
     }
 
-    34.0
+    // Return the last rate in the table (already handles f64::MAX)
+    // This line should never execute due to f64::MAX sentinel
+    table.last().map(|&(_, rate)| rate).unwrap_or(0.0)
 }
 
 // ===============================================================
@@ -244,10 +261,25 @@ fn calculate_gross(bruto: i64, rate: f64) -> f64 {
 }
 
 /// Official PP58 Gross-Up — dynamic TER re-evaluation loop.
+/// 
+/// Why this needs a loop:
+/// - Gross-Up increases total penghasilan (bruto + tunjangan pajak)
+/// - Higher total penghasilan may move to a higher TER bracket
+/// - New TER changes the tax → which changes total penghasilan again
+/// - So TER and total must be recalculated until TER becomes stable
+///
+/// Loop steps:
+/// 1. Hitung total penghasilan memakai TER saat ini
+/// 2. Cek TER baru berdasarkan total penghasilan tersebut
+/// 3. Jika TER sama → selesai (stabil)
+/// 4. Jika TER berubah → ulangi perhitungan dengan TER baru
+///
+/// Convergence is very fast (1–3 loops), but we cap max iterations for safety.
 fn calculate_gross_up_with_dynamic_ter(bruto: i64, category: TerCategory) -> (f64, f64, f64) {
     let mut rate = get_ter_rate(category, bruto as f64);
+    const MAX_ITERATIONS: u8 = 10; // TER tables have finite brackets
 
-    loop {
+    for _ in 0..MAX_ITERATIONS {
         let total = (bruto as f64 * (100.0 / (100.0 - rate))).floor();
         let new_rate = get_ter_rate(category, total);
 
@@ -256,9 +288,14 @@ fn calculate_gross_up_with_dynamic_ter(bruto: i64, category: TerCategory) -> (f6
             let tunjangan = total - bruto as f64;
             return (tunjangan, pph21, rate);
         }
-
         rate = new_rate;
     }
+
+    // Fallback: use last computed values
+    let total = (bruto as f64 * (100.0 / (100.0 - rate))).floor();
+    let pph21 = ((total * rate) / 100.0).floor();
+    let tunjangan = total - bruto as f64;
+    (tunjangan, pph21, rate)
 }
 
 // ===============================================================
@@ -280,7 +317,7 @@ fn main() {
     println!("Penghasilan Bruto : {}", format_rupiah(bruto));
     println!("Status PTKP       : {}", ptkp.display_name());
     println!("Kategori TER      : {:?}", category);
-    println!("Tarif TER Awal    : {}%", initial_rate as i64);
+    println!("Tarif TER Awal    : {}%", initial_rate);
     println!("Metode            : {:?}\n", method);
 
     match method {
@@ -288,7 +325,6 @@ fn main() {
             let pph21 = calculate_gross(bruto, initial_rate); // already floored
             let pph21_int = pph21 as i64; // safe to convert to i64
             println!("PPh21 (Gross)     : {}", format_rupiah(pph21_int));
-            println!("Penghasilan Bersih: {}", bruto - pph21_int);
         }
 
         CalculationMethod::GrossUp => {
@@ -298,11 +334,10 @@ fn main() {
             let tunjangan_int = tunjangan as i64;
             let pph21_int = pph21 as i64;
 
-            println!("Tarif TER Akhir   : {}%", final_rate as i64);
+            println!("Tarif TER Akhir   : {}%", final_rate);
             println!("Tunjangan PPh21   : {}", format_rupiah(tunjangan_int));
             println!("Total Penghasilan : {}", format_rupiah(bruto + tunjangan_int));
             println!("PPh21 (Gross-Up)  : {}", format_rupiah(pph21_int));
-            println!("Penghasilan Bersih: {}", format_rupiah(bruto));
         }
     }
 }
